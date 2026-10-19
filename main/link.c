@@ -7,8 +7,11 @@
 #include "audio.h"
 #include "board.h"
 #include "cJSON.h"
+#include "config.h"
+#include "discovery.h"
 #include "esp_app_desc.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
 #include "esp_websocket_client.h"
@@ -31,6 +34,11 @@ static const char *TAG = "link";
  */
 static uint8_t pinned_key[32];
 static bool pin_valid;
+/* Satellite neuf, sans jeton : il demande à être associé et retient la clé de ce premier
+ * Cornelius (confiance au premier contact), qu'il épinglera ensuite. */
+static bool pairing_mode;
+static uint8_t candidate_key[32];
+static bool candidate_seen;
 /* mbedTLS exige une liste d'autorités, même vide : c'est la vérification ci-dessous qui juge. */
 static mbedtls_x509_crt no_authority;
 
@@ -60,6 +68,12 @@ static int verify_key(void *ctx, mbedtls_x509_crt *crt, int depth, uint32_t *fla
     }
     uint8_t digest[32];
     mbedtls_sha256(crt->pk_raw.p, crt->pk_raw.len, digest, 0);
+    if (pairing_mode) {
+        memcpy(candidate_key, digest, sizeof(digest));
+        candidate_seen = true;
+        *flags = 0;
+        return 0;
+    }
     if (pin_valid && memcmp(digest, pinned_key, sizeof(digest)) == 0) {
         *flags = 0;
     } else {
@@ -92,6 +106,7 @@ static int16_t (*frame_pool)[LINK_FRAME_SAMPLES];
 static QueueHandle_t frames;
 static uint8_t next_slot;
 static void sender_task(void *arg);
+static void start_client(const char *uri);
 static char headers[320];
 /* Message texte reçu en plusieurs morceaux. */
 static char text[1024];
@@ -121,6 +136,16 @@ static void send_hello(void)
     if (satellite.muted) link_send_mic(true);
 }
 
+static void send_pair(void)
+{
+    cJSON *pair = cJSON_CreateObject();
+    cJSON_AddStringToObject(pair, "type", "pair");
+    cJSON_AddNumberToObject(pair, "protocol", SATELLITE_PROTOCOL);
+    cJSON_AddStringToObject(pair, "device", discovery_device_name());
+    cJSON_AddStringToObject(pair, "firmware", esp_app_get_description()->version);
+    send_json(pair);
+}
+
 static void set_conversation(conversation_t next)
 {
     if (satellite.conversation == next) return;
@@ -138,7 +163,27 @@ static void handle_text(const char *body, size_t length)
         cJSON_Delete(message);
         return;
     }
-    if (strcmp(type, "welcome") == 0) {
+    if (strcmp(type, "waiting") == 0) {
+        satellite.pairing = true;
+        ESP_LOGI(TAG, "En attente d'association dans l'administration de Cornelius (%s)",
+                 discovery_device_name());
+    } else if (strcmp(type, "identify") == 0) {
+        satellite.identify_until_us = esp_timer_get_time() + 4000000;
+    } else if (strcmp(type, "paired") == 0) {
+        const char *token = cJSON_GetStringValue(cJSON_GetObjectItem(message, "token"));
+        const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(message, "name"));
+        if (token && candidate_seen) {
+            char key[100] = {0};
+            for (int i = 0; i < 32; i++)
+                snprintf(key + strlen(key), sizeof(key) - strlen(key), i ? ":%02X" : "%02X",
+                         candidate_key[i]);
+            config_set("key", key);
+            config_set("token", token);
+            ESP_LOGI(TAG, "Associé à Cornelius : « %s ». Redémarrage.", name ? name : "?");
+            cJSON_Delete(message);
+            esp_restart();
+        }
+    } else if (strcmp(type, "welcome") == 0) {
         const cJSON *volume = cJSON_GetObjectItem(message, "volume");
         const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(message, "name"));
         if (cJSON_IsNumber(volume)) board_set_volume(volume->valueint);
@@ -162,6 +207,16 @@ static void handle_text(const char *body, size_t length)
     } else if (strcmp(type, "volume") == 0) {
         const cJSON *volume = cJSON_GetObjectItem(message, "volume");
         if (cJSON_IsNumber(volume)) board_set_volume(volume->valueint);
+    } else if (strcmp(type, "settings") == 0) {
+        const cJSON *volume = cJSON_GetObjectItem(message, "volume");
+        const cJSON *led = cJSON_GetObjectItem(message, "led");
+        const cJSON *brightness = cJSON_GetObjectItem(led, "brightness");
+        config_apply_settings(cJSON_GetStringValue(cJSON_GetObjectItem(led, "color")),
+                              cJSON_IsNumber(brightness) ? brightness->valueint : 6,
+                              cJSON_IsTrue(cJSON_GetObjectItem(led, "nightLight")),
+                              cJSON_IsNumber(volume) ? volume->valueint : 70,
+                              cJSON_IsTrue(cJSON_GetObjectItem(message, "attentive")));
+        ESP_LOGI(TAG, "Réglages reçus de Cornelius");
     }
     cJSON_Delete(message);
 }
@@ -170,6 +225,7 @@ static void offline(void)
 {
     satellite.online = false;
     satellite.listen = false;
+    satellite.pairing = false;
     set_conversation(CONVERSATION_IDLE);
 }
 
@@ -179,7 +235,8 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *event_d
     switch (id) {
     case WEBSOCKET_EVENT_CONNECTED:
         ESP_LOGI(TAG, "WebSocket ouvert");
-        send_hello();
+        if (pairing_mode) send_pair();
+        else send_hello();
         break;
     case WEBSOCKET_EVENT_DISCONNECTED:
     case WEBSOCKET_EVENT_CLOSED:
@@ -210,16 +267,70 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *event_d
     }
 }
 
+/* Adresse fixe si elle est réglée, sinon Cornelius trouvé par mDNS (nouvel essai toutes les
+ * 5 s tant qu'aucun ne répond). */
+static void resolve_server(char *uri, size_t size)
+{
+    const satellite_config_t *config = config_get();
+    if (config->server_uri[0]) {
+        strlcpy(uri, config->server_uri, size);
+        return;
+    }
+    while (!discovery_find(uri, size)) vTaskDelay(pdMS_TO_TICKS(5000));
+}
+
+/*
+ * Démarrage de la liaison, puis surveillance : injoignable depuis 30 s (ordinateur qui a changé
+ * d'adresse, Wi-Fi du PC coupé…), Cornelius est recherché par mDNS ; s'il a une autre adresse,
+ * la liaison y repart. Vaut aussi pour une adresse fixe devenue fausse.
+ */
+static void link_task(void *arg)
+{
+    while (!satellite.wifi) vTaskDelay(pdMS_TO_TICKS(200));
+    static char uri[128];
+    resolve_server(uri, sizeof(uri));
+    pairing_mode = config_needs_pairing();
+    if (pairing_mode) strlcat(uri, "/pair", sizeof(uri));
+    start_client(uri);
+    int offline_s = 0;
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        offline_s = satellite.online ? 0 : offline_s + 1;
+        if (offline_s < 30 || !satellite.wifi) continue;
+        offline_s = 0;
+        char found[128];
+        if (!discovery_find(found, sizeof(found))) continue;
+        if (pairing_mode) strlcat(found, "/pair", sizeof(found));
+        if (strcmp(found, uri) == 0) continue;
+        ESP_LOGI(TAG, "Cornelius a changé d'adresse : %s", found);
+        strlcpy(uri, found, sizeof(uri));
+        esp_websocket_client_stop(client);
+        esp_websocket_client_set_uri(client, uri);
+        esp_websocket_client_start(client);
+    }
+}
+
 void link_start(void)
 {
-    snprintf(headers, sizeof(headers), "Authorization: Bearer %s\r\n", CONFIG_SATELLITE_TOKEN);
-    pin_valid = parse_pin(CONFIG_SATELLITE_SERVER_KEY_SHA256, pinned_key);
-    const bool secure = strncmp(CONFIG_SATELLITE_SERVER_URI, "wss:", 4) == 0;
-    if (secure && !pin_valid)
+    frame_pool = heap_caps_malloc(FRAME_SLOTS * FRAME_BYTES, MALLOC_CAP_INTERNAL);
+    frames = xQueueCreate(FRAME_QUEUE, sizeof(uint8_t));
+    if (!frame_pool || !frames) ESP_LOGE(TAG, "Pas de mémoire pour la file du micro");
+    xTaskCreatePinnedToCore(sender_task, "sender", 4096, NULL, 6, NULL, 0);
+    xTaskCreate(link_task, "link", 6144, NULL, 5, NULL);
+}
+
+static void start_client(const char *uri)
+{
+    const satellite_config_t *settings = config_get();
+    if (!pairing_mode)
+        snprintf(headers, sizeof(headers), "Authorization: Bearer %s\r\n", settings->token);
+    pin_valid = parse_pin(settings->server_key, pinned_key);
+    const bool secure = strncmp(uri, "wss:", 4) == 0;
+    if (secure && !pin_valid && !pairing_mode)
         ESP_LOGE(TAG, "Empreinte de la clé de Cornelius absente ou invalide : connexion refusée");
     esp_websocket_client_config_t config = {
-        .uri = CONFIG_SATELLITE_SERVER_URI,
-        .headers = headers,
+        .uri = uri,
+        .headers = pairing_mode ? NULL : headers,
         .crt_bundle_attach = secure ? attach_key_pin : NULL,
         /* La clé épinglée identifie Cornelius ; le nom ou l'adresse du certificat n'ajoute rien
          * (il change avec les adresses de l'ordinateur). */
@@ -231,13 +342,10 @@ void link_start(void)
         .task_prio = 6,
         .ping_interval_sec = 10,
     };
-    frame_pool = heap_caps_malloc(FRAME_SLOTS * FRAME_BYTES, MALLOC_CAP_INTERNAL);
-    frames = xQueueCreate(FRAME_QUEUE, sizeof(uint8_t));
-    if (!frame_pool || !frames) ESP_LOGE(TAG, "Pas de mémoire pour la file du micro");
+    ESP_LOGI(TAG, "Connexion à %s", uri);
     client = esp_websocket_client_init(&config);
     esp_websocket_register_events(client, WEBSOCKET_EVENT_ANY, on_event, NULL);
     esp_websocket_client_start(client);
-    xTaskCreatePinnedToCore(sender_task, "sender", 4096, NULL, 6, NULL, 0);
 }
 
 void link_send_frame(const int16_t *frame)

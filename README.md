@@ -6,77 +6,83 @@ Carte visée : **Waveshare ESP32-S3-AUDIO-Board** (ESP32-S3R8, 8 Mo de PSRAM, 16
 
 Le dialogue avec Cornelius suit le **protocole des satellites, version 1**, décrit dans le dépôt de Cornelius : `docs/developpement/satellites-protocole.md`.
 
-## Ce que fait la version 0.1
+## Mettre en service un satellite
 
-- Se connecte au Wi-Fi, puis à Cornelius en `wss://` avec son jeton ; ne fait confiance qu'à la clé de Cornelius, dont l'empreinte est réglée à la compilation.
+Aucune compilation à refaire, aucun jeton à recopier :
+
+1. Branchez le satellite (neuf, ou remis à zéro). Son anneau **respire en bleu** : il ouvre un réseau Wi-Fi « **Cornelius-Satellite-XXXX** ».
+2. Connectez-y un téléphone. La page de configuration s'ouvre seule (sinon : `http://192.168.4.1`). Choisissez le Wi-Fi de la maison (2,4 GHz) et son mot de passe, puis **Enregistrer**.
+3. Le satellite redémarre, rejoint votre Wi-Fi et trouve Cornelius sur le réseau (mDNS). Son anneau **respire en blanc** : il attend d'être associé.
+4. Dans Cornelius, **Administration → Satellites audio → Nouveaux satellites** : « Faire clignoter » pour le reconnaître, une pièce, puis **Associer**. Le satellite reçoit son jeton, retient la clé de Cornelius et redémarre : il est prêt.
+
+Si le Wi-Fi enregistré ne répond pas (mot de passe changé…), le portail rouvre de lui-même après quelques essais.
+
+**Remise à zéro** : bouton **BOOT** tenu 5 secondes (pas RST), l'anneau clignote en rouge, puis le satellite repart de l'étape 1.
+
+## Ce qu'il fait
+
 - Envoie le son du micro (PCM 16 bits, 16 kHz, trames de 80 ms) **seulement quand Cornelius le demande** (`listen`) : Cornelius y cherche « Cornelius ».
 - Joue la voix de Cornelius pendant la conversation, avec 200 ms d'avance pour absorber les à-coups du Wi-Fi.
+- Ne fait confiance qu'à la clé de Cornelius retenue à l'association (empreinte SHA-256), même quand Cornelius renouvelle son certificat.
+- Applique les réglages de l'administration (message `settings`) : volume, couleur et luminosité de l'anneau, veilleuse ; gardés dans la carte pour le démarrage suivant.
 - Semi-duplex : Cornelius coupe le micro pendant qu'il parle (pas encore d'annulation d'écho sur la carte, `aec: false`).
-- Bouton **BOOT** : coupe ou rouvre le micro (vie privée), état gardé après un redémarrage.
-- Anneau de LED :
+- Bouton **BOOT** : appui bref, micro coupé ou rouvert (vie privée, gardé après un redémarrage) ; tenu 5 s, remise à zéro.
 
-| Couleur | Sens |
+| Anneau | Sens |
 |---|---|
+| bleu qui respire | portail de configuration ouvert |
 | bleu qui tourne | recherche du Wi-Fi |
-| orange qui respire | Cornelius injoignable (adresse, jeton ou empreinte de clé) |
-| éteint | veille |
-| blanc bref | « Cornelius » entendu |
-| turquoise qui tourne | la conversation s'ouvre |
-| turquoise, plus vif quand il parle | conversation en cours |
+| blanc qui respire | en attente d'association dans l'administration |
+| blanc qui clignote | « Faire clignoter » |
+| orange qui respire | Cornelius injoignable |
+| éteint, ou veilleuse | veille |
+| couleur choisie, bref | « Cornelius » entendu |
+| couleur choisie qui tourne | la conversation s'ouvre |
+| couleur choisie, plus vive quand il parle | conversation en cours |
 | ambre qui clignote | occupé : une conversation se tient ailleurs |
 | rouge | micro coupé |
+| rouge qui clignote | remise à zéro |
 
-## Préparer la compilation
+La couleur principale et la luminosité se règlent dans l'administration ; les alertes gardent la leur.
+
+## Compiler et flasher
 
 ESP-IDF 5.4 ou plus récent (testé avec 5.5.6). Sous Windows, dans PowerShell :
 
 ```powershell
 . C:\Users\artus\esp\esp-idf\export.ps1
 idf.py set-target esp32s3
-idf.py menuconfig
-```
-
-Dans **Satellite Cornelius**, renseignez :
-
-- le réseau Wi-Fi (2,4 GHz) et son mot de passe ;
-- l'adresse de Cornelius, par exemple `wss://192.168.1.10:3443/satellite` ;
-- l'empreinte de la clé de Cornelius, affichée au même endroit (32 octets séparés par des deux-points) ;
-- le jeton, créé dans **Administration → Satellites audio** (montré une seule fois).
-
-Cornelius signe lui-même son certificat et le recrée quand les adresses de l'ordinateur changent ; sa clé, elle, reste la même. Le satellite vérifie donc l'empreinte de cette clé, pas le certificat : rien à recopier quand le certificat change. L'accès depuis le réseau local doit être activé dans Cornelius.
-
-`sdkconfig` (Wi-Fi, jeton) reste hors du dépôt.
-
-## Compiler et flasher
-
-```powershell
 idf.py build
 idf.py -p COM5 flash monitor
 ```
 
-Remplacez `COM5` par le port de la carte (Gestionnaire de périphériques). Le journal série dit chaque étape : carte audio, Wi-Fi, WebSocket, « Accueilli par Cornelius ».
+Remplacez `COM5` par le port de la carte (Gestionnaire de périphériques). Le journal série dit chaque étape : carte audio, Wi-Fi, Cornelius trouvé, « Accueilli par Cornelius ».
+
+Pour le développement, `idf.py menuconfig` (**Satellite Cornelius**) permet aussi d'inscrire le Wi-Fi, une adresse fixe de Cornelius, son empreinte de clé et un jeton créé dans l'administration : ces valeurs servent tant que la carte n'a pas été configurée par le portail ou remise à zéro. `sdkconfig` reste hors du dépôt.
 
 ## Organisation
 
 | Fichier | Rôle |
 |---|---|
 | `main/board.c` | bus I²C, ampli (EXIO8 du TCA9555), codecs ES8311 et ES7210, I²S en duplex (sortie standard, entrée TDM sur 4 voies) |
-| `main/link.c` | WebSocket et protocole : `hello`, `welcome`, `listen`, `wake`, `busy`, `session`, `volume`, `mic` |
+| `main/config.c` | configuration en NVS (Wi-Fi, adresse, jeton, clé), réglages reçus, remise à zéro |
+| `main/portal.c` | portail de configuration : point d'accès, page, DNS captif |
+| `main/discovery.c` | mDNS : nom du satellite, recherche de `_cornelius._tcp` |
+| `main/link.c` | WebSocket et protocole : association, `hello`, `settings`, `listen`, `wake`, `busy`, `session`, `mic` ; clé épinglée |
 | `main/audio.c` | lecture continue du micro, tampon de lecture en PSRAM |
-| `main/leds.c` | anneau de LED (GPIO38) |
+| `main/leds.c` | anneau de LED (GPIO38, ordre RGB) |
 | `main/button.c` | bouton BOOT (GPIO0) |
-| `main/wifi.c` | Wi-Fi en station, reconnexion |
+| `main/wifi.c` | Wi-Fi en station, reconnexion, portail si le Wi-Fi ne répond pas |
 
 Le câblage vient du wiki Waveshare et de la carte `waveshare/esp32-s3-audio-board` de [xiaozhi-esp32](https://github.com/78/xiaozhi-esp32) (licence MIT), dont la configuration I²S et codecs est reprise.
 
 ## Essayé sur la carte
 
-Le 19 octobre 2026, sur une Waveshare ESP32-S3-AUDIO-Board : Wi-Fi, connexion à Cornelius, mot d'appel entendu par Cornelius, conversation à voix nette, fin après silence, mémoire au nom du profil rattaché. Le Wi-Fi a des à-coups d'une à deux secondes : le micro passe par une file d'envoi qui les absorbe (journal « Envoi du micro lent »).
+Le 19 octobre 2026, sur une Waveshare ESP32-S3-AUDIO-Board : portail de configuration, association depuis l'administration, découverte mDNS, réglages appliqués, mot d'appel entendu par Cornelius, conversation à voix nette, fin après silence, mémoire au nom du profil rattaché. Le Wi-Fi a des à-coups d'une à deux secondes : le micro passe par une file d'envoi qui les absorbe (journal « Envoi du micro lent »).
 
 ## Pas encore fait
 
-- Le nombre exact de LED de l'anneau (6 ou 7) et le réglage fin du gain du micro restent à confirmer.
-- Annulation d'écho (ESP-SR, avec la voie de référence de l'ES7210) pour pouvoir couper la parole à Cornelius.
+- Annulation d'écho (ESP-SR, avec la voie de référence de l'ES7210) pour l'écoute attentive : couper la parole à Cornelius.
 - Mot d'appel détecté sur la carte (microWakeWord), pour que rien ne parte sur le réseau en veille.
-- Configuration du Wi-Fi et du jeton sans recompiler (point d'accès de configuration), mise à jour à distance.
-- Boutons K1 à K3 de la carte.
+- Mise à jour du firmware à distance.
+- Le nombre exact de LED de l'anneau (6 ou 7), le réglage fin du gain du micro, les boutons K1 à K3.

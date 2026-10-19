@@ -13,8 +13,10 @@ static const char *TAG = "leds";
 
 #define LED_GPIO 38
 #define LED_COUNT CONFIG_SATELLITE_LED_COUNT
-/* Luminosité maximale : un satellite de chambre ne doit pas éclairer la pièce. */
+/* Alertes (Wi-Fi, hors ligne, occupé, micro coupé) : couleur et intensité fixes, toujours vues. */
 #define LED_MAX 60
+/* Couleur principale à la luminosité 10 : un satellite de chambre n'éclaire pas la pièce. */
+#define LED_FULL 90
 
 static led_strip_handle_t strip;
 
@@ -49,21 +51,31 @@ static void render(float seconds, int64_t now_us)
     static const color_t blue = {0, 20, LED_MAX};
     static const color_t orange = {LED_MAX, 25, 0};
     static const color_t red = {LED_MAX, 0, 0};
-    static const color_t white = {LED_MAX, LED_MAX, LED_MAX};
-    static const color_t teal = {0, LED_MAX, 45};
     static const color_t amber = {LED_MAX, 40, 0};
+    /* Couleur principale choisie dans l'administration, à la luminosité choisie. */
+    const float scale = satellite.led_brightness * LED_FULL / (10.0f * 255.0f);
+    const color_t accent = {satellite.led_r * scale, satellite.led_g * scale,
+                            satellite.led_b * scale};
 
+    static const color_t white = {LED_MAX, LED_MAX, LED_MAX};
+    if (now_us < satellite.reset_at_us) return fill(red, ((now_us / 100000) % 2) ? 0.9f : 0);
+    if (now_us < satellite.identify_until_us)
+        return fill(white, ((now_us / 250000) % 2) ? 0.9f : 0);
+    /* Portail de configuration ouvert : bleu qui respire. */
+    if (satellite.setup && !satellite.wifi) return fill(blue, pulse(seconds, 3.0f));
     if (satellite.muted) return fill(red, 0.35f);
     if (!satellite.wifi) return spin(blue, seconds);
+    /* En attente d'association : blanc qui respire. */
+    if (satellite.pairing) return fill(white, pulse(seconds, 3.0f) * 0.5f);
     if (!satellite.online) return fill(orange, pulse(seconds, 2.0f) * 0.6f);
     if (now_us - satellite.busy_at_us < 1200000)
         return fill(amber, ((now_us - satellite.busy_at_us) / 200000) % 2 ? 0 : 0.8f);
-    if (satellite.conversation == CONVERSATION_CONNECTING) return spin(teal, seconds);
+    if (satellite.conversation == CONVERSATION_CONNECTING) return spin(accent, seconds);
     if (satellite.conversation == CONVERSATION_READY)
-        return fill(teal, satellite.speaking ? pulse(seconds, 0.6f) : 0.3f);
-    if (now_us - satellite.wake_at_us < 400000) return fill(white, 0.8f);
-    /* Veille : éteint. Le micro n'envoie rien tant que Cornelius ne le demande pas. */
-    fill((color_t){0, 0, 0}, 0);
+        return fill(accent, satellite.speaking ? pulse(seconds, 0.6f) : 0.3f);
+    if (now_us - satellite.wake_at_us < 400000) return fill(accent, 1.0f);
+    /* Veille : éteint, ou veilleuse, une lueur faible de la couleur principale. */
+    fill(accent, satellite.night_light ? 0.08f : 0);
 }
 
 static void leds_task(void *arg)
@@ -83,7 +95,8 @@ void leds_start(void)
         .strip_gpio_num = LED_GPIO,
         .max_leds = LED_COUNT,
         .led_model = LED_MODEL_WS2812,
-        .color_component_format = LED_STRIP_COLOR_COMPONENT_FMT_GRB,
+        /* Anneau de la Waveshare : composantes dans l'ordre rouge, vert, bleu (pas GRB). */
+        .color_component_format = LED_STRIP_COLOR_COMPONENT_FMT_RGB,
     };
     const led_strip_rmt_config_t rmt = {
         .clk_src = RMT_CLK_SRC_DEFAULT,

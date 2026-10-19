@@ -9,11 +9,12 @@ menu "Satellite Cornelius"
         default ""
 
     config SATELLITE_SERVER_URI
-        string "Adresse de Cornelius"
-        default "wss://192.168.1.10:3443/satellite"
+        string "Adresse fixe de Cornelius (vide : trouvé par mDNS)"
+        default ""
         help
-            Adresse du WebSocket des satellites : wss://<ordinateur>:3443/satellite, visible
-            dans Administration → Satellites audio lors de la création du satellite.
+            Laisser vide : le satellite trouve Cornelius sur le réseau local (mDNS,
+            _cornelius._tcp). Sinon, wss://<adresse>:3443/satellite ; si cette adresse ne
+            répond plus pendant 30 s, le satellite cherche aussi Cornelius par mDNS.
 
     config SATELLITE_SERVER_KEY_SHA256
         string "Empreinte de la clé de Cornelius (SHA-256)"

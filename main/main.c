@@ -8,6 +8,8 @@
 #include "audio.h"
 #include "board.h"
 #include "button.h"
+#include "config.h"
+#include "discovery.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -30,6 +32,7 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(err);
 
+    config_load();
     leds_start();
     button_start();
     if (board_init() != ESP_OK) {
@@ -37,8 +40,10 @@ void app_main(void)
         ESP_LOGE(TAG, "Carte audio indisponible");
         return;
     }
+    config_load_settings();
     audio_start();
     wifi_start();
+    discovery_start();
     link_start();
     ESP_LOGI(TAG, "Satellite démarré");
 }

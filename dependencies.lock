@@ -53,6 +53,16 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 3.1.0~1
+  espressif/mdns:
+    component_hash: b5b30022c46302eab89c1d2e3b6fb5918a627563a7462f0ee284b22b9a934967
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.14.0
   idf:
     source:
       type: idf
@@ -62,7 +72,8 @@ direct_dependencies:
 - espressif/esp_io_expander_tca95xx_16bit
 - espressif/esp_websocket_client
 - espressif/led_strip
+- espressif/mdns
 - idf
-manifest_hash: 70c23cbabb4c4a2746dbabda086913c72d394fba0cfa9c986896b57f53ecc5ed
+manifest_hash: 282dfc659057df1b8fd0e5082268eefcfdb1a278e0a68150ef07d8fe753ba112
 target: esp32s3
 version: 2.0.0

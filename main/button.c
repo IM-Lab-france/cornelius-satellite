@@ -1,6 +1,9 @@
 #include "button.h"
 
+#include "config.h"
 #include "driver/gpio.h"
+#include "esp_system.h"
+#include "esp_timer.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -38,8 +41,18 @@ static void button_task(void *arg)
     for (;;) {
         const bool down = gpio_get_level(BUTTON_GPIO) == 0;
         if (down) {
-            pressed_for++;
-        } else if (pressed_for >= 2) { /* relâché après 40 ms au moins : anti-rebond */
+            /* Tenu 5 s : réinitialisation, l'anneau clignote en rouge puis le satellite repart
+             * du portail de configuration. */
+            if (++pressed_for == 250) {
+                ESP_LOGW(TAG, "Bouton tenu 5 s : réinitialisation");
+                satellite.reset_at_us = esp_timer_get_time() + 1500000;
+                config_forget();
+                vTaskDelay(pdMS_TO_TICKS(1500));
+                esp_restart();
+            }
+        } else if (pressed_for >= 50) { /* relâché entre 1 et 5 s : sans effet */
+            pressed_for = 0;
+        } else if (pressed_for >= 2) { /* appui bref (anti-rebond 40 ms) : micro coupé ou rouvert */
             satellite.muted = !satellite.muted;
             save_muted(satellite.muted);
             link_send_mic(satellite.muted);
