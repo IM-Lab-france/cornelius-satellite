@@ -25,7 +25,7 @@ Si le Wi-Fi enregistré ne répond pas (mot de passe changé…), le portail rou
 - Joue la voix de Cornelius pendant la conversation, avec 200 ms d'avance pour absorber les à-coups du Wi-Fi.
 - Ne fait confiance qu'à la clé de Cornelius retenue à l'association (empreinte SHA-256), même quand Cornelius renouvelle son certificat.
 - Applique les réglages de l'administration (message `settings`) : volume, couleur et luminosité de l'anneau, veilleuse ; gardés dans la carte pour le démarrage suivant.
-- Semi-duplex : Cornelius coupe le micro pendant qu'il parle (pas encore d'annulation d'écho sur la carte, `aec: false`).
+- Annulation d'écho (ESP-SR, voie de référence du haut-parleur sur l'ES7210) : avec l'**écoute attentive** activée dans l'administration, le micro reste ouvert pendant que Cornelius parle et on peut lui couper la parole. Sinon, semi-duplex : Cornelius coupe le micro pendant qu'il parle. Mesurée sur la carte : sa voix baisse de 35 à 55 dB ; les niveaux partent dans le journal de Cornelius (« Journal du satellite ») pendant qu'il parle.
 - Bouton **BOOT** : appui bref, micro coupé ou rouvert (vie privée, gardé après un redémarrage) ; tenu 5 s, remise à zéro.
 
 | Anneau | Sens |
@@ -70,6 +70,7 @@ Pour le développement, `idf.py menuconfig` (**Satellite Cornelius**) permet aus
 | `main/discovery.c` | mDNS : nom du satellite, recherche de `_cornelius._tcp` |
 | `main/link.c` | WebSocket et protocole : association, `hello`, `settings`, `listen`, `wake`, `busy`, `session`, `mic` ; clé épinglée |
 | `main/audio.c` | lecture continue du micro, tampon de lecture en PSRAM |
+| `main/echo.c` | annulation d'écho ESP-SR (micro 1 et référence, blocs de 16 ms) |
 | `main/leds.c` | anneau de LED (GPIO38, ordre RGB) |
 | `main/button.c` | bouton BOOT (GPIO0) |
 | `main/wifi.c` | Wi-Fi en station, reconnexion, portail si le Wi-Fi ne répond pas |
@@ -78,11 +79,12 @@ Le câblage vient du wiki Waveshare et de la carte `waveshare/esp32-s3-audio-boa
 
 ## Essayé sur la carte
 
-Le 19 octobre 2026, sur une Waveshare ESP32-S3-AUDIO-Board : portail de configuration, association depuis l'administration, découverte mDNS, réglages appliqués, mot d'appel entendu par Cornelius, conversation à voix nette, fin après silence, mémoire au nom du profil rattaché. Le Wi-Fi a des à-coups d'une à deux secondes : le micro passe par une file d'envoi qui les absorbe (journal « Envoi du micro lent »).
+Le 19 octobre 2026, sur une Waveshare ESP32-S3-AUDIO-Board : portail de configuration, association depuis l'administration, découverte mDNS, réglages appliqués, mot d'appel entendu par Cornelius, conversation à voix nette, fin après silence, mémoire au nom du profil rattaché, annulation d'écho et parole coupée.
+
+TCP rattrape un paquet perdu en 1, 2 voire 4 s : le micro passe par une file d'envoi qui tolère 10 s et abandonne les trames trop anciennes (journal « Envoi du micro lent »). Si ces à-coups gênent en conversation, compresser le son (Opus) réduirait les pertes.
 
 ## Pas encore fait
 
-- Annulation d'écho (ESP-SR, avec la voie de référence de l'ES7210) pour l'écoute attentive : couper la parole à Cornelius.
 - Mot d'appel détecté sur la carte (microWakeWord), pour que rien ne parte sur le réseau en veille.
 - Mise à jour du firmware à distance.
 - Le nombre exact de LED de l'anneau (6 ou 7), le réglage fin du gain du micro, les boutons K1 à K3.

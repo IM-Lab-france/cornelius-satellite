@@ -42,10 +42,12 @@ menu "Satellite Cornelius"
         default 7
 
     config SATELLITE_AEC
-        bool "Annonce l'annulation d'écho (aec)"
-        default n
+        bool "Annulation d'écho (écoute attentive)"
+        default y
         help
-            Laisser désactivé tant que l'annulation d'écho n'est pas faite sur la carte :
-            le serveur coupe alors le micro pendant que Cornelius parle (semi-duplex).
+            Lit la référence du haut-parleur (voie 2 de l'ES7210) et retire l'écho du micro
+            avec ESP-SR ; le satellite l'annonce (aec) et, si l'écoute attentive est activée
+            dans l'administration, Cornelius garde le micro ouvert pendant qu'il parle.
+            Désactivée : semi-duplex, le micro est coupé pendant que Cornelius parle.
 
 endmenu

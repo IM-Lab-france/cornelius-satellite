@@ -9,6 +9,7 @@
 #include "cJSON.h"
 #include "config.h"
 #include "discovery.h"
+#include "echo.h"
 #include "esp_app_desc.h"
 #include "esp_log.h"
 #include "esp_system.h"
@@ -106,6 +107,8 @@ static int16_t (*frame_pool)[LINK_FRAME_SAMPLES];
 static QueueHandle_t frames;
 static uint8_t next_slot;
 static void sender_task(void *arg);
+static char pending_log[200];
+static volatile bool log_pending;
 static void start_client(const char *uri);
 static char headers[320];
 /* Message texte reçu en plusieurs morceaux. */
@@ -127,11 +130,7 @@ static void send_hello(void)
     cJSON_AddStringToObject(hello, "type", "hello");
     cJSON_AddNumberToObject(hello, "protocol", SATELLITE_PROTOCOL);
     cJSON_AddStringToObject(hello, "firmware", esp_app_get_description()->version);
-#ifdef CONFIG_SATELLITE_AEC
-    cJSON_AddBoolToObject(hello, "aec", true);
-#else
-    cJSON_AddBoolToObject(hello, "aec", false);
-#endif
+    cJSON_AddBoolToObject(hello, "aec", echo_active());
     send_json(hello);
     if (satellite.muted) link_send_mic(true);
 }
@@ -312,7 +311,8 @@ static void link_task(void *arg)
 
 void link_start(void)
 {
-    frame_pool = heap_caps_malloc(FRAME_SLOTS * FRAME_BYTES, MALLOC_CAP_INTERNAL);
+    /* En PSRAM : la mémoire interne revient à l'annulation d'écho et au Wi-Fi. */
+    frame_pool = heap_caps_malloc(FRAME_SLOTS * FRAME_BYTES, MALLOC_CAP_SPIRAM);
     frames = xQueueCreate(FRAME_QUEUE, sizeof(uint8_t));
     if (!frame_pool || !frames) ESP_LOGE(TAG, "Pas de mémoire pour la file du micro");
     xTaskCreatePinnedToCore(sender_task, "sender", 4096, NULL, 6, NULL, 0);
@@ -350,7 +350,8 @@ static void start_client(const char *uri)
 
 void link_send_frame(const int16_t *frame)
 {
-    if (!satellite.online || !satellite.listen || satellite.muted || !frames) return;
+    if (!satellite.online || !satellite.listen || satellite.muted || !frames || !frame_pool)
+        return;
     /* La tâche du micro ne doit jamais attendre le Wi-Fi : la trame est copiée dans un
      * emplacement libre et confiée à la tâche d'envoi. File pleine : la plus ancienne part. */
     const uint8_t slot = next_slot;
@@ -364,9 +365,9 @@ void link_send_frame(const int16_t *frame)
 }
 
 /*
- * Envoi du micro, à part : le Wi-Fi a des à-coups de quelques centaines de millisecondes.
- * Une écriture qui dépasse son délai ferme la connexion WebSocket ; on lui laisse donc 2 s,
- * et l'on rattrape le retard en abandonnant les trames les plus anciennes.
+ * Envoi du micro, à part : TCP rattrape un paquet perdu au bout d'1, 2 puis 4 s (mesuré). Une
+ * écriture qui dépasse son délai ferme la connexion WebSocket ; on lui laisse donc 10 s, et l'on
+ * rattrape le retard en abandonnant les trames les plus anciennes.
  */
 static void sender_task(void *arg)
 {
@@ -383,9 +384,16 @@ static void sender_task(void *arg)
             dropped = 0;
         }
         if (!satellite.online || !esp_websocket_client_is_connected(client)) continue;
+        if (log_pending) {
+            cJSON *log = cJSON_CreateObject();
+            cJSON_AddStringToObject(log, "type", "log");
+            cJSON_AddStringToObject(log, "message", pending_log);
+            send_json(log);
+            log_pending = false;
+        }
         const int64_t start = esp_timer_get_time();
         const int sent = esp_websocket_client_send_bin(client, (const char *)frame_pool[slot],
-                                                       FRAME_BYTES, pdMS_TO_TICKS(2000));
+                                                       FRAME_BYTES, pdMS_TO_TICKS(10000));
         const int64_t took_ms = (esp_timer_get_time() - start) / 1000;
         if (sent < 0) ESP_LOGW(TAG, "Envoi du micro échoué après %lld ms", took_ms);
         else if (took_ms > 250) ESP_LOGW(TAG, "Envoi du micro lent : %lld ms", took_ms);
@@ -399,4 +407,13 @@ void link_send_mic(bool muted)
     cJSON_AddStringToObject(mic, "type", "mic");
     cJSON_AddBoolToObject(mic, "muted", muted);
     send_json(mic);
+}
+
+void link_send_log(const char *message)
+{
+    /* Appelée par la tâche du micro, qui ne doit jamais attendre le Wi-Fi : le message part
+     * avec la prochaine trame, par la tâche d'envoi. Un message en attente n'est pas remplacé. */
+    if (log_pending) return;
+    strlcpy(pending_log, message, sizeof(pending_log));
+    log_pending = true;
 }

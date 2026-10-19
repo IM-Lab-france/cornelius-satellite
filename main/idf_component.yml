@@ -5,3 +5,4 @@ dependencies:
   espressif/led_strip: "^3.0"
   espressif/esp_io_expander_tca95xx_16bit: "*"
   espressif/mdns: "^1.4"
+  espressif/esp-sr: "^2.0"

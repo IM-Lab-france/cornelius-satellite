@@ -176,13 +176,21 @@ static esp_err_t init_codecs(void)
     esp_codec_dev_sample_info_t in_fs = {
         .bits_per_sample = 16,
         .channel = 4,
-        .channel_mask = ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0),
+        .channel_mask = ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0)
+#ifdef CONFIG_SATELLITE_AEC
+                        | ESP_CODEC_DEV_MAKE_CHANNEL_MASK(1)
+#endif
+        ,
         .sample_rate = BOARD_SAMPLE_RATE,
     };
     ESP_RETURN_ON_FALSE(esp_codec_dev_open(microphone, &in_fs) == ESP_CODEC_DEV_OK, ESP_FAIL,
                         TAG, "ouverture des micros");
     esp_codec_dev_set_in_channel_gain(microphone, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0),
                                       CONFIG_SATELLITE_MIC_GAIN_DB);
+#ifdef CONFIG_SATELLITE_AEC
+    /* La référence est le signal du haut-parleur lui-même : sans gain, pour ne pas saturer. */
+    esp_codec_dev_set_in_channel_gain(microphone, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(1), 0);
+#endif
 
     esp_codec_dev_sample_info_t out_fs = {
         .bits_per_sample = 16,

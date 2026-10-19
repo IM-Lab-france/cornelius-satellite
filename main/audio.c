@@ -1,7 +1,9 @@
 #include "audio.h"
 
 #include <stdbool.h>
+#include <string.h>
 #include "board.h"
+#include "echo.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -28,11 +30,12 @@ static volatile bool flush_requested;
 static void capture_task(void *arg)
 {
     static int16_t frame[LINK_FRAME_SAMPLES];
+    static int16_t raw[LINK_FRAME_SAMPLES * BOARD_MIC_CHANNELS];
     int64_t last = esp_timer_get_time();
     for (;;) {
         /* Le micro est toujours lu, pour que le tampon I2S ne déborde jamais ; la trame ne
          * part que si Cornelius la demande et que le micro n'est pas coupé. */
-        if (board_mic_read(frame, LINK_FRAME_SAMPLES) != ESP_OK) {
+        if (board_mic_read(raw, LINK_FRAME_SAMPLES * BOARD_MIC_CHANNELS) != ESP_OK) {
             ESP_LOGW(TAG, "Lecture du micro échouée");
             vTaskDelay(pdMS_TO_TICKS(10));
             continue;
@@ -41,6 +44,13 @@ static void capture_task(void *arg)
         if (now - last > 200000)
             ESP_LOGW(TAG, "Trou dans la lecture du micro : %lld ms", (now - last) / 1000);
         last = now;
+        if (BOARD_MIC_CHANNELS == 1) {
+            memcpy(frame, raw, sizeof(frame));
+        } else if (echo_active()) {
+            echo_process(raw, frame, LINK_FRAME_SAMPLES);
+        } else {
+            for (size_t i = 0; i < LINK_FRAME_SAMPLES; i++) frame[i] = raw[2 * i];
+        }
         link_send_frame(frame);
     }
 }
@@ -117,9 +127,11 @@ void audio_play_flush(void)
 
 void audio_start(void)
 {
+    echo_start();
     play_buffer = xRingbufferCreateWithCaps(PLAY_BUFFER_BYTES, RINGBUF_TYPE_BYTEBUF,
                                             MALLOC_CAP_SPIRAM);
     if (!play_buffer) ESP_LOGE(TAG, "Pas de mémoire pour le tampon de lecture");
-    xTaskCreatePinnedToCore(capture_task, "capture", 4096, NULL, 7, NULL, 1);
+    /* 16 Ko : l'annulation d'écho d'ESP-SR travaille sur la pile de cette tâche. */
+    xTaskCreatePinnedToCore(capture_task, "capture", 16384, NULL, 7, NULL, 1);
     xTaskCreatePinnedToCore(playback_task, "playback", 4096, NULL, 7, NULL, 1);
 }

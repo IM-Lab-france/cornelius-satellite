@@ -17,3 +17,6 @@ void link_send_frame(const int16_t *frame);
 
 /** Bouton de vie privée : prévient le serveur que le micro est coupé ou rouvert. */
 void link_send_mic(bool muted);
+
+/** Mesure à inscrire dans le journal de Cornelius (200 caractères, une par seconde au plus). */
+void link_send_log(const char *message);
