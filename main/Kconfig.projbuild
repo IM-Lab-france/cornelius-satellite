@@ -15,6 +15,15 @@ menu "Satellite Cornelius"
             Adresse du WebSocket des satellites : wss://<ordinateur>:3443/satellite, visible
             dans Administration → Satellites audio lors de la création du satellite.
 
+    config SATELLITE_SERVER_KEY_SHA256
+        string "Empreinte de la clé de Cornelius (SHA-256)"
+        default ""
+        help
+            Empreinte de la clé publique de Cornelius, 32 octets en hexadécimal séparés par
+            des deux-points, affichée dans Administration → Satellites audio. Le satellite ne
+            se connecte qu'au serveur qui détient cette clé ; elle ne change pas quand
+            Cornelius renouvelle son certificat.
+
     config SATELLITE_TOKEN
         string "Jeton du satellite"
         default ""

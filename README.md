@@ -8,7 +8,7 @@ Le dialogue avec Cornelius suit le **protocole des satellites, version 1**, déc
 
 ## Ce que fait la version 0.1
 
-- Se connecte au Wi-Fi, puis à Cornelius en `wss://` avec son jeton ; ne fait confiance qu'au certificat de Cornelius embarqué à la compilation.
+- Se connecte au Wi-Fi, puis à Cornelius en `wss://` avec son jeton ; ne fait confiance qu'à la clé de Cornelius, dont l'empreinte est réglée à la compilation.
 - Envoie le son du micro (PCM 16 bits, 16 kHz, trames de 80 ms) **seulement quand Cornelius le demande** (`listen`) : Cornelius y cherche « Cornelius ».
 - Joue la voix de Cornelius pendant la conversation, avec 200 ms d'avance pour absorber les à-coups du Wi-Fi.
 - Semi-duplex : Cornelius coupe le micro pendant qu'il parle (pas encore d'annulation d'écho sur la carte, `aec: false`).
@@ -18,7 +18,7 @@ Le dialogue avec Cornelius suit le **protocole des satellites, version 1**, déc
 | Couleur | Sens |
 |---|---|
 | bleu qui tourne | recherche du Wi-Fi |
-| orange qui respire | Cornelius injoignable (adresse, jeton ou certificat) |
+| orange qui respire | Cornelius injoignable (adresse, jeton ou empreinte de clé) |
 | éteint | veille |
 | blanc bref | « Cornelius » entendu |
 | turquoise qui tourne | la conversation s'ouvre |
@@ -40,11 +40,12 @@ Dans **Satellite Cornelius**, renseignez :
 
 - le réseau Wi-Fi (2,4 GHz) et son mot de passe ;
 - l'adresse de Cornelius, par exemple `wss://192.168.1.10:3443/satellite` ;
+- l'empreinte de la clé de Cornelius, affichée au même endroit (32 octets séparés par des deux-points) ;
 - le jeton, créé dans **Administration → Satellites audio** (montré une seule fois).
 
-Copiez le certificat de Cornelius dans `main/server_cert.pem` : c'est le fichier `data/tls/cert.pem` de l'ordinateur du miroir (l'accès depuis le réseau local doit être activé). Comparez son empreinte avec celle affichée dans **Mise en route → Accès depuis le réseau local**.
+Cornelius signe lui-même son certificat et le recrée quand les adresses de l'ordinateur changent ; sa clé, elle, reste la même. Le satellite vérifie donc l'empreinte de cette clé, pas le certificat : rien à recopier quand le certificat change. L'accès depuis le réseau local doit être activé dans Cornelius.
 
-`sdkconfig` (Wi-Fi, jeton) et `main/server_cert.pem` restent hors du dépôt.
+`sdkconfig` (Wi-Fi, jeton) reste hors du dépôt.
 
 ## Compiler et flasher
 
@@ -68,9 +69,13 @@ Remplacez `COM5` par le port de la carte (Gestionnaire de périphériques). Le j
 
 Le câblage vient du wiki Waveshare et de la carte `waveshare/esp32-s3-audio-board` de [xiaozhi-esp32](https://github.com/78/xiaozhi-esp32) (licence MIT), dont la configuration I²S et codecs est reprise.
 
+## Essayé sur la carte
+
+Le 19 octobre 2026, sur une Waveshare ESP32-S3-AUDIO-Board : Wi-Fi, connexion à Cornelius, mot d'appel entendu par Cornelius, conversation à voix nette, fin après silence, mémoire au nom du profil rattaché. Le Wi-Fi a des à-coups d'une à deux secondes : le micro passe par une file d'envoi qui les absorbe (journal « Envoi du micro lent »).
+
 ## Pas encore fait
 
-- **Essai sur la carte** : ce firmware compile mais n'a pas encore tourné sur le matériel. Points à vérifier en premier : le son du micro (voie TDM et gain), le volume, le nombre de LED (6 ou 7).
+- Le nombre exact de LED de l'anneau (6 ou 7) et le réglage fin du gain du micro restent à confirmer.
 - Annulation d'écho (ESP-SR, avec la voie de référence de l'ES7210) pour pouvoir couper la parole à Cornelius.
 - Mot d'appel détecté sur la carte (microWakeWord), pour que rien ne parte sur le réseau en veille.
 - Configuration du Wi-Fi et du jeton sans recompiler (point d'accès de configuration), mise à jour à distance.

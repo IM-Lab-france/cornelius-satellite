@@ -1,5 +1,7 @@
+#define MBEDTLS_ALLOW_PRIVATE_ACCESS
 #include "link.h"
 
+#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 #include "audio.h"
@@ -8,18 +10,88 @@
 #include "esp_app_desc.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_heap_caps.h"
 #include "esp_websocket_client.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+#include "freertos/task.h"
+#include "mbedtls/sha256.h"
+#include "mbedtls/ssl.h"
+#include "mbedtls/x509_crt.h"
 #include "sdkconfig.h"
 #include "state.h"
 
 static const char *TAG = "link";
 
-/* Certificat auto-signé de Cornelius (data/tls/cert.pem), embarqué à la compilation : le
- * satellite ne fait confiance qu'à lui. Vide pour une adresse ws:// de développement. */
-extern const char server_cert_start[] asm("_binary_server_cert_pem_start");
-extern const char server_cert_end[] asm("_binary_server_cert_pem_end");
+/*
+ * Cornelius signe lui-même son certificat et le recrée quand les adresses de l'ordinateur
+ * changent ; sa clé, elle, ne change pas. Le satellite ne fait donc confiance qu'à cette clé :
+ * l'empreinte SHA-256 de sa clé publique (SubjectPublicKeyInfo), affichée dans
+ * Administration → Satellites audio.
+ */
+static uint8_t pinned_key[32];
+static bool pin_valid;
+/* mbedTLS exige une liste d'autorités, même vide : c'est la vérification ci-dessous qui juge. */
+static mbedtls_x509_crt no_authority;
+
+static bool parse_pin(const char *text, uint8_t out[32])
+{
+    size_t count = 0;
+    for (const char *p = text; *p && count < 32;) {
+        if (*p == ':' || *p == ' ') {
+            p++;
+            continue;
+        }
+        if (!isxdigit((unsigned char)p[0]) || !isxdigit((unsigned char)p[1])) return false;
+        char pair[3] = {p[0], p[1], 0};
+        out[count++] = (uint8_t)strtoul(pair, NULL, 16);
+        p += 2;
+    }
+    return count == 32;
+}
+
+static int verify_key(void *ctx, mbedtls_x509_crt *crt, int depth, uint32_t *flags)
+{
+    /* Seule la clé du serveur compte : ni autorité, ni nom, ni dates (l'horloge du satellite
+     * n'est pas réglée au démarrage). */
+    if (depth != 0) {
+        *flags = 0;
+        return 0;
+    }
+    uint8_t digest[32];
+    mbedtls_sha256(crt->pk_raw.p, crt->pk_raw.len, digest, 0);
+    if (pin_valid && memcmp(digest, pinned_key, sizeof(digest)) == 0) {
+        *flags = 0;
+    } else {
+        ESP_LOGE(TAG, "Clé de serveur inconnue : ce n'est pas le Cornelius configuré");
+        *flags |= MBEDTLS_X509_BADCERT_NOT_TRUSTED;
+    }
+    return 0;
+}
+
+static esp_err_t attach_key_pin(void *conf)
+{
+    mbedtls_ssl_config *ssl = conf;
+    mbedtls_x509_crt_init(&no_authority);
+    mbedtls_ssl_conf_ca_chain(ssl, &no_authority, NULL);
+    mbedtls_ssl_conf_authmode(ssl, MBEDTLS_SSL_VERIFY_REQUIRED);
+    mbedtls_ssl_conf_verify(ssl, verify_key, NULL);
+    return ESP_OK;
+}
 
 static esp_websocket_client_handle_t client;
+
+/* Trames du micro en attente d'envoi : 12 au plus dans la file (≈ 1 s), 16 emplacements pour
+ * qu'une trame en cours d'envoi ne soit jamais réécrite. Au-delà de 8 en attente (640 ms de
+ * retard), les plus anciennes sont abandonnées : le son doit rester en temps réel. */
+#define FRAME_BYTES (LINK_FRAME_SAMPLES * sizeof(int16_t))
+#define FRAME_SLOTS 16
+#define FRAME_QUEUE 12
+#define FRAME_BACKLOG_MAX 8
+static int16_t (*frame_pool)[LINK_FRAME_SAMPLES];
+static QueueHandle_t frames;
+static uint8_t next_slot;
+static void sender_task(void *arg);
 static char headers[320];
 /* Message texte reçu en plusieurs morceaux. */
 static char text[1024];
@@ -141,13 +213,16 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *event_d
 void link_start(void)
 {
     snprintf(headers, sizeof(headers), "Authorization: Bearer %s\r\n", CONFIG_SATELLITE_TOKEN);
-    const bool pinned = server_cert_end - server_cert_start > 1;
+    pin_valid = parse_pin(CONFIG_SATELLITE_SERVER_KEY_SHA256, pinned_key);
+    const bool secure = strncmp(CONFIG_SATELLITE_SERVER_URI, "wss:", 4) == 0;
+    if (secure && !pin_valid)
+        ESP_LOGE(TAG, "Empreinte de la clé de Cornelius absente ou invalide : connexion refusée");
     esp_websocket_client_config_t config = {
         .uri = CONFIG_SATELLITE_SERVER_URI,
         .headers = headers,
-        .cert_pem = pinned ? server_cert_start : NULL,
-        /* Le certificat de Cornelius nomme l'ordinateur, pas son adresse IP : seul le
-         * certificat exact est accepté, c'est lui qui protège la connexion. */
+        .crt_bundle_attach = secure ? attach_key_pin : NULL,
+        /* La clé épinglée identifie Cornelius ; le nom ou l'adresse du certificat n'ajoute rien
+         * (il change avec les adresses de l'ordinateur). */
         .skip_cert_common_name_check = true,
         .reconnect_timeout_ms = 3000,
         .network_timeout_ms = 10000,
@@ -156,20 +231,57 @@ void link_start(void)
         .task_prio = 6,
         .ping_interval_sec = 10,
     };
-    if (!pinned && strncmp(config.uri, "wss:", 4) == 0)
-        ESP_LOGE(TAG, "main/server_cert.pem est vide : la connexion wss:// sera refusée");
+    frame_pool = heap_caps_malloc(FRAME_SLOTS * FRAME_BYTES, MALLOC_CAP_INTERNAL);
+    frames = xQueueCreate(FRAME_QUEUE, sizeof(uint8_t));
+    if (!frame_pool || !frames) ESP_LOGE(TAG, "Pas de mémoire pour la file du micro");
     client = esp_websocket_client_init(&config);
     esp_websocket_register_events(client, WEBSOCKET_EVENT_ANY, on_event, NULL);
     esp_websocket_client_start(client);
+    xTaskCreatePinnedToCore(sender_task, "sender", 4096, NULL, 6, NULL, 0);
 }
 
 void link_send_frame(const int16_t *frame)
 {
-    if (!satellite.online || !satellite.listen || satellite.muted) return;
-    if (!esp_websocket_client_is_connected(client)) return;
-    /* Une trame en retard ne sert plus à rien : on n'attend pas. */
-    esp_websocket_client_send_bin(client, (const char *)frame,
-                                  LINK_FRAME_SAMPLES * sizeof(int16_t), pdMS_TO_TICKS(40));
+    if (!satellite.online || !satellite.listen || satellite.muted || !frames) return;
+    /* La tâche du micro ne doit jamais attendre le Wi-Fi : la trame est copiée dans un
+     * emplacement libre et confiée à la tâche d'envoi. File pleine : la plus ancienne part. */
+    const uint8_t slot = next_slot;
+    next_slot = (next_slot + 1) % FRAME_SLOTS;
+    memcpy(frame_pool[slot], frame, FRAME_BYTES);
+    if (xQueueSend(frames, &slot, 0) != pdTRUE) {
+        uint8_t oldest;
+        xQueueReceive(frames, &oldest, 0);
+        xQueueSend(frames, &slot, 0);
+    }
+}
+
+/*
+ * Envoi du micro, à part : le Wi-Fi a des à-coups de quelques centaines de millisecondes.
+ * Une écriture qui dépasse son délai ferme la connexion WebSocket ; on lui laisse donc 2 s,
+ * et l'on rattrape le retard en abandonnant les trames les plus anciennes.
+ */
+static void sender_task(void *arg)
+{
+    uint8_t slot;
+    unsigned dropped = 0;
+    for (;;) {
+        if (xQueueReceive(frames, &slot, portMAX_DELAY) != pdTRUE) continue;
+        if (uxQueueMessagesWaiting(frames) > FRAME_BACKLOG_MAX) {
+            dropped++;
+            continue;
+        }
+        if (dropped) {
+            ESP_LOGW(TAG, "Micro en retard : %u trames abandonnées", dropped);
+            dropped = 0;
+        }
+        if (!satellite.online || !esp_websocket_client_is_connected(client)) continue;
+        const int64_t start = esp_timer_get_time();
+        const int sent = esp_websocket_client_send_bin(client, (const char *)frame_pool[slot],
+                                                       FRAME_BYTES, pdMS_TO_TICKS(2000));
+        const int64_t took_ms = (esp_timer_get_time() - start) / 1000;
+        if (sent < 0) ESP_LOGW(TAG, "Envoi du micro échoué après %lld ms", took_ms);
+        else if (took_ms > 250) ESP_LOGW(TAG, "Envoi du micro lent : %lld ms", took_ms);
+    }
 }
 
 void link_send_mic(bool muted)

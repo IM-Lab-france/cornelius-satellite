@@ -15,3 +15,10 @@ CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=64
 CONFIG_FREERTOS_HZ=1000
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+
+# Envoi du micro en continu (32 Ko/s chiffrés) : tampons TCP plus larges que par défaut.
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=16384
+CONFIG_LWIP_TCP_WND_DEFAULT=16384
+# Envoi du micro et réception de la voix en même temps : un verrou d'envoi à part, pour que
+# l'un n'attende pas l'autre.
+CONFIG_ESP_WS_CLIENT_SEPARATE_TX_LOCK=y

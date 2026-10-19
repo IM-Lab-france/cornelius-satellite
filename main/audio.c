@@ -28,13 +28,19 @@ static volatile bool flush_requested;
 static void capture_task(void *arg)
 {
     static int16_t frame[LINK_FRAME_SAMPLES];
+    int64_t last = esp_timer_get_time();
     for (;;) {
         /* Le micro est toujours lu, pour que le tampon I2S ne déborde jamais ; la trame ne
          * part que si Cornelius la demande et que le micro n'est pas coupé. */
         if (board_mic_read(frame, LINK_FRAME_SAMPLES) != ESP_OK) {
+            ESP_LOGW(TAG, "Lecture du micro échouée");
             vTaskDelay(pdMS_TO_TICKS(10));
             continue;
         }
+        const int64_t now = esp_timer_get_time();
+        if (now - last > 200000)
+            ESP_LOGW(TAG, "Trou dans la lecture du micro : %lld ms", (now - last) / 1000);
+        last = now;
         link_send_frame(frame);
     }
 }
