@@ -1,0 +1,68 @@
+dependencies:
+  espressif/esp_codec_dev:
+    component_hash: 4779f31a3ba3f9b38aee1afe6ccb9ba8f6108dc3a6e77d39d7d714e9a215371b
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.6.2
+  espressif/esp_io_expander:
+    component_hash: 7b7f91270172e46ca4597e3874f48d8412e280e8c295559f5922ec38656e3e5f
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.4.2'
+    source:
+      registry_url: https://components.espressif.com
+      type: service
+    version: 1.2.1
+  espressif/esp_io_expander_tca95xx_16bit:
+    component_hash: a9608ba5753ae2a72e79fccd376fc4283343c0306d23505fbf8a46fafdbde2a2
+    dependencies:
+    - name: espressif/esp_io_expander
+      registry_url: https://components.espressif.com
+      require: public
+      version: ^1.2.0
+    - name: idf
+      require: private
+      version: '>=5.2'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 2.0.2
+  espressif/esp_websocket_client:
+    component_hash: dc00233af846f3a744ada283a300e0d586040aadc3ee67361645ecdce4523672
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.8.0
+  espressif/led_strip:
+    component_hash: 097f698887601de00bed7ff58f91b9e074fa1ae1bcf53582034b01191cc88e9f
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.2'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 3.1.0~1
+  idf:
+    source:
+      type: idf
+    version: 5.5.6
+direct_dependencies:
+- espressif/esp_codec_dev
+- espressif/esp_io_expander_tca95xx_16bit
+- espressif/esp_websocket_client
+- espressif/led_strip
+- idf
+manifest_hash: 70c23cbabb4c4a2746dbabda086913c72d394fba0cfa9c986896b57f53ecc5ed
+target: esp32s3
+version: 2.0.0

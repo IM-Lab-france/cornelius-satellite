@@ -1,0 +1,41 @@
+menu "Satellite Cornelius"
+
+    config SATELLITE_WIFI_SSID
+        string "Wi-Fi : nom du réseau (2,4 GHz)"
+        default ""
+
+    config SATELLITE_WIFI_PASSWORD
+        string "Wi-Fi : mot de passe"
+        default ""
+
+    config SATELLITE_SERVER_URI
+        string "Adresse de Cornelius"
+        default "wss://192.168.1.10:3443/satellite"
+        help
+            Adresse du WebSocket des satellites : wss://<ordinateur>:3443/satellite, visible
+            dans Administration → Satellites audio lors de la création du satellite.
+
+    config SATELLITE_TOKEN
+        string "Jeton du satellite"
+        default ""
+        help
+            Jeton montré une seule fois dans Administration → Satellites audio.
+
+    config SATELLITE_MIC_GAIN_DB
+        int "Gain du micro (dB)"
+        range 0 37
+        default 30
+
+    config SATELLITE_LED_COUNT
+        int "Nombre de LED de l'anneau"
+        range 1 16
+        default 7
+
+    config SATELLITE_AEC
+        bool "Annonce l'annulation d'écho (aec)"
+        default n
+        help
+            Laisser désactivé tant que l'annulation d'écho n'est pas faite sur la carte :
+            le serveur coupe alors le micro pendant que Cornelius parle (semi-duplex).
+
+endmenu

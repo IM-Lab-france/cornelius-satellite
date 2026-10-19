@@ -1,0 +1,7 @@
+build/
+managed_components/
+# Contient le Wi-Fi et le jeton du satellite : jamais dans le dépôt.
+sdkconfig
+sdkconfig.old
+# Certificat propre à chaque installation de Cornelius (voir README).
+main/server_cert.pem
