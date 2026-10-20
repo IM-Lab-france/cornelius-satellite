@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 420" width="1280" height="420" role="img" aria-labelledby="titre desc">
+  <title id="titre">Cornelius · satellite audio</title>
+  <desc id="desc">Un satellite audio à l’anneau lumineux, relié par des ondes à l’orbe de Cornelius, sur un miroir noir.</desc>
+  <defs>
+    <linearGradient id="fond" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0b1312" />
+      <stop offset="1" stop-color="#030605" />
+    </linearGradient>
+    <radialGradient id="halo" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#38b4a0" stop-opacity="0.45" />
+      <stop offset="0.55" stop-color="#38b4a0" stop-opacity="0.1" />
+      <stop offset="1" stop-color="#38b4a0" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="orbe" cx="0.42" cy="0.34" r="0.72">
+      <stop offset="0" stop-color="#e4fbf5" />
+      <stop offset="0.28" stop-color="#9fe6d8" />
+      <stop offset="0.62" stop-color="#3fb7a3" />
+      <stop offset="1" stop-color="#0f4f45" />
+    </radialGradient>
+    <linearGradient id="irise" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7cc4ff" />
+      <stop offset="0.35" stop-color="#b39dff" />
+      <stop offset="0.65" stop-color="#ff8f7a" />
+      <stop offset="1" stop-color="#9fe0c0" />
+    </linearGradient>
+    <linearGradient id="boitier" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1c2624" />
+      <stop offset="1" stop-color="#0d1413" />
+    </linearGradient>
+    <filter id="flou" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="6" />
+    </filter>
+    <filter id="lueur" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="3" />
+    </filter>
+  </defs>
+
+  <rect width="1280" height="420" rx="28" fill="url(#fond)" />
+  <rect x="14" y="14" width="1252" height="392" rx="20" fill="none" stroke="#dbe9c9" stroke-opacity="0.08" />
+
+  <!-- Poussière lumineuse -->
+  <g fill="#c6f2e7">
+    <circle cx="96" cy="70" r="1.4" opacity="0.5" />
+    <circle cx="250" cy="370" r="1.1" opacity="0.4" />
+    <circle cx="640" cy="52" r="1.2" opacity="0.35" />
+    <circle cx="1188" cy="84" r="1.5" opacity="0.45" />
+    <circle cx="1104" cy="372" r="1.1" opacity="0.4" />
+    <circle cx="760" cy="388" r="1.3" opacity="0.3" />
+  </g>
+
+  <!-- Le satellite : boîtier, haut-parleur et anneau de LED -->
+  <g transform="translate(200 210)">
+    <circle r="150" fill="url(#halo)" />
+    <rect x="-92" y="-92" width="184" height="184" rx="34" fill="url(#boitier)" stroke="#dbe9c9" stroke-opacity="0.16" />
+    <g fill="#6fd1bf">
+      <circle cx="0" cy="-58" r="6" filter="url(#lueur)" />
+      <circle cx="45.3" cy="-36.2" r="6" filter="url(#lueur)" />
+      <circle cx="56.5" cy="12.9" r="6" filter="url(#lueur)" opacity="0.85" />
+      <circle cx="25.2" cy="52.3" r="6" filter="url(#lueur)" opacity="0.7" />
+      <circle cx="-25.2" cy="52.3" r="6" filter="url(#lueur)" opacity="0.55" />
+      <circle cx="-56.5" cy="12.9" r="6" filter="url(#lueur)" opacity="0.4" />
+      <circle cx="-45.3" cy="-36.2" r="6" filter="url(#lueur)" opacity="0.3" />
+    </g>
+    <g fill="#f2efe8">
+      <circle cx="0" cy="-58" r="3" />
+      <circle cx="45.3" cy="-36.2" r="3" />
+      <circle cx="56.5" cy="12.9" r="3" opacity="0.85" />
+      <circle cx="25.2" cy="52.3" r="3" opacity="0.7" />
+      <circle cx="-25.2" cy="52.3" r="3" opacity="0.55" />
+      <circle cx="-56.5" cy="12.9" r="3" opacity="0.4" />
+      <circle cx="-45.3" cy="-36.2" r="3" opacity="0.3" />
+    </g>
+    <g fill="#9baba2" opacity="0.5">
+      <circle cx="-12" cy="-12" r="2.4" /><circle cx="0" cy="-12" r="2.4" /><circle cx="12" cy="-12" r="2.4" />
+      <circle cx="-12" cy="0" r="2.4" /><circle cx="0" cy="0" r="2.4" /><circle cx="12" cy="0" r="2.4" />
+      <circle cx="-12" cy="12" r="2.4" /><circle cx="0" cy="12" r="2.4" /><circle cx="12" cy="12" r="2.4" />
+    </g>
+  </g>
+
+  <!-- Les ondes vers Cornelius -->
+  <g fill="none" stroke-linecap="round">
+    <path d="M330 166 Q350 210 330 254" stroke="#7cc4ff" stroke-width="3" stroke-opacity="0.75" />
+    <path d="M360 146 Q388 210 360 274" stroke="#b39dff" stroke-width="3" stroke-opacity="0.55" />
+    <path d="M390 126 Q426 210 390 294" stroke="#ff8f7a" stroke-width="3" stroke-opacity="0.35" />
+    <path d="M430 210 H520" stroke="#6fd1bf" stroke-width="1.6" stroke-opacity="0.5" stroke-dasharray="2 7" />
+  </g>
+
+  <!-- Orbe de Cornelius, plus loin -->
+  <g transform="translate(572 210)">
+    <circle r="60" fill="url(#halo)" />
+    <circle r="40" fill="none" stroke="url(#irise)" stroke-width="4" opacity="0.5" filter="url(#flou)" />
+    <circle r="36" fill="url(#orbe)" />
+    <circle r="36" fill="none" stroke="url(#irise)" stroke-width="1.2" opacity="0.7" />
+    <ellipse cx="-8" cy="-18" rx="18" ry="8" fill="#ffffff" opacity="0.28" />
+  </g>
+
+  <!-- Titre -->
+  <g font-family="'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif">
+    <text x="700" y="176" font-size="74" font-weight="600" fill="#f2efe8" letter-spacing="2">Cornelius</text>
+    <text x="704" y="228" font-size="40" font-weight="300" fill="#6fd1bf" letter-spacing="1">satellite audio</text>
+    <text x="704" y="276" font-size="22" fill="#9baba2">Parler à Cornelius depuis une autre pièce,</text>
+    <text x="704" y="306" font-size="22" fill="#9baba2">installé sans une ligne à saisir</text>
+    <text x="704" y="350" font-size="17" fill="#6fd1bf" letter-spacing="1.5">ESP32-S3 · MOT D’APPEL · ÉCHO ANNULÉ</text>
+  </g>
+</svg>
